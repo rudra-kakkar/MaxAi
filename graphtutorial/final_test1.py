@@ -50,23 +50,23 @@ def get_pending_emails():
     conn.close()
     return emails
 
-def update_expected_date(email, expected_date, frequency):
-    """Update the expected_date for recurring emails based on the original expected_date."""
+def update_expected_date(email, subject, expected_date, frequency):
+    """Update the expected_date for recurring emails based on the original expected_date and subject."""
     if frequency:
         new_expected_date = expected_date + timedelta(days=frequency)
         query = """
             UPDATE emails 
             SET expected_date = %s 
-            WHERE email = %s
+            WHERE email = %s AND subject = %s
         """
-        values = (new_expected_date.strftime('%Y-%m-%d'), email)
+        values = (new_expected_date.strftime('%Y-%m-%d'), email, subject)
 
         conn = connect_db()
         cursor = conn.cursor()
         cursor.execute(query, values)
         conn.commit()
         conn.close()
-
+        
 def insert_email_delay(email, subject, expected_date, delay_days):
     print(email,subject)
     """Insert delay record into email_delays table if not already present."""
@@ -103,7 +103,6 @@ def insert_email_delay(email, subject, expected_date, delay_days):
 
     conn.close()
 
-
 async def check_emails_for_subjects(graph: Graph, pending_emails):
     """Check inbox for pending emails and return a list of missing ones."""
     message_page = await graph.get_inbox()
@@ -126,8 +125,6 @@ async def check_emails_for_subjects(graph: Graph, pending_emails):
                         expected_date = date.fromisoformat(expected_date)
 
                     # Create a regex pattern to match the subject and expected date
-                    # Example: If subject is "Daily Report" and expected_date is 2023-10-26,
-                    # the regex will match "Daily Report 2023-10-26"
                     date_str = expected_date.strftime('%Y-%m-%d')  # Format date as YYYY-MM-DD
                     pattern = re.compile(rf"{re.escape(expected_subject)}.*{re.escape(date_str)}", re.IGNORECASE)
 
@@ -139,9 +136,9 @@ async def check_emails_for_subjects(graph: Graph, pending_emails):
                     ):
                         users_who_sent_emails.add(sender_email)
 
-                        # **Update expected_date only for new emails**
-                        update_expected_date(sender_email, expected_date, expected["frequency"])
-                        print(f"✅ Updated expected date for {sender_email} (Received: {received_date})")
+                        # **Update expected_date only for the specific email and subject**
+                        update_expected_date(sender_email, expected_subject, expected_date, expected["frequency"])
+                        print(f"✅ Updated expected date for {sender_email} | Subject: {expected_subject} (Received: {received_date})")
 
     users_to_notify = []
     for user in pending_emails:
@@ -158,13 +155,11 @@ async def check_emails_for_subjects(graph: Graph, pending_emails):
             users_to_notify.append({**user, "delay_days": delay_days})
 
             # Insert delay record into email_delays
-            # Fix: Instead of referencing undefined subject, use expected_subject
             expected_subject = user["subject"].lower()
             print(email, "------", expected_subject)
             insert_email_delay(email, expected_subject, expected_date, delay_days)
 
     return users_to_notify
-
 
 
 async def send_reminder(graph: Graph, user):
@@ -206,9 +201,9 @@ async def send_alert(graph: Graph, user):
         f"Regards, MaxAI"
         f"Dont provide anything which is not needed at all"
     )
-    print("working")
+    # print("working")
     body = await send_request_to_llm(prompt, user)
-    print(body)
+    # print(body)
     await graph.send_mail(subject, body, user["email"])
     print(f"Alert email sent to {user['user_name']} at {user['email']} (Delay: {delay_days} days)")
 
